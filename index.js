@@ -1,0 +1,468 @@
+import figlet from 'figlet';
+import fs from 'fs/promises';
+import { createInterface } from 'readline/promises';
+import axios from 'axios';
+import { HttpsProxyAgent } from 'https-proxy-agent';
+import randomUseragent from 'random-useragent';
+import ora from 'ora';
+import chalk from 'chalk';
+import moment from 'moment-timezone';
+import crypto from 'crypto';
+import { GoogleGenAI } from '@google/genai';
+
+function getTimestamp() {
+  return moment().tz('Asia/Jakarta').format('D/M/YYYY, HH:mm:ss');
+}
+
+function displayBanner() {
+  const width = process.stdout.columns || 80;
+  const banner = figlet.textSync('\n NT EXHAUST', { font: "ANSI Shadow", horizontalLayout: 'Speed' });
+  banner.split('\n').forEach(line => {
+    console.log(chalk.cyanBright(line.padStart(line.length + Math.floor((width - line.length) / 2))));
+  });
+  console.log(chalk.cyanBright(' '.repeat((width - 50) / 2) + '=== Telegram Channel 🚀 : NT Exhaust ( @NTExhaust ) ==='));
+  console.log(chalk.yellowBright(' '.repeat((width - 30) / 2) + '✪ BOT MENTION NETWORK x GEMINI ✪\n'));
+}
+
+const rl = createInterface({
+  input: process.stdin,
+  output: process.stdout,
+});
+
+async function promptUser(question) {
+  const answer = await rl.question(chalk.white(question));
+  return answer.trim();
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function typeText(text, color, noType = false) {
+  if (isSpinnerActive) await sleep(500);
+  const maxLength = 80;
+  const displayText = text.length > maxLength ? text.slice(0, maxLength) + '...' : text;
+  if (noType) {
+    console.log(color(` ┊ │ ${displayText}`));
+    return;
+  }
+  const totalTime = 200;
+  const sleepTime = displayText.length > 0 ? totalTime / displayText.length : 1;
+  console.log(color(' ┊ ┌── Response Chat API ──'));
+  process.stdout.write(color(' ┊ │ '));
+  for (const char of displayText) {
+    process.stdout.write(char);
+    await sleep(sleepTime);
+  }
+  process.stdout.write('\n');
+  console.log(color(' ┊ └──'));
+}
+
+function createProgressBar(current, total) {
+  const barLength = 30;
+  const filled = Math.round((current / total) * barLength);
+  return `[${'█'.repeat(filled)}${' '.repeat(barLength - filled)} ${current}/${total}]`;
+}
+
+function displayHeader(text, color, forceClear = false) {
+  if (isSpinnerActive) return;
+  if (forceClear) console.clear();
+  console.log(color(text));
+}
+
+async function clearConsoleLine() {
+  process.stdout.clearLine(0);
+  process.stdout.cursorTo(0);
+}
+
+let isSpinnerActive = false;
+
+async function getUserInfo(bearerToken, proxy = null, retryCount = 0) {
+  const maxRetries = 5;
+  await clearConsoleLine();
+  const spinner = ora({ text: chalk.cyan(` ┊ → Getting User Info${retryCount > 0 ? ` [Retry ke-${retryCount}/${maxRetries}]` : ''}`), prefixText: '', spinner: 'bouncingBar', interval: 120 }).start();
+  isSpinnerActive = true;
+  try {
+    let config = {
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${bearerToken}`,
+        'User-Agent': randomUseragent.getRandom(),
+      },
+    };
+    if (proxy) {
+      config.httpAgent = new HttpsProxyAgent(proxy);
+      config.httpsAgent = new HttpsProxyAgent(proxy);
+    }
+    const response = await axios.get('https://api.mention.network/users/me', config);
+    const userData = response.data;
+    if (!userData.id) throw new Error('Invalid response: user ID missing');
+    spinner.succeed(chalk.green(` ┊ ✓ User Info Fetched Successfully`));
+    await sleep(500);
+    return userData;
+  } catch (err) {
+    if (retryCount < maxRetries - 1) {
+      spinner.text = chalk.cyan(` ┊ → Getting User Info [Retry ke-${retryCount + 1}/${maxRetries}]`);
+      await sleep(5000);
+      return getUserInfo(bearerToken, proxy, retryCount + 1);
+    }
+    spinner.fail(chalk.red(` ┊ ✗ Failed Getting User Info: ${err.message}`));
+    await sleep(500);
+    throw err;
+  } finally {
+    spinner.stop();
+    isSpinnerActive = false;
+    await clearConsoleLine();
+  }
+}
+
+async function getRandomQuestions(bearerToken, proxy = null, retryCount = 0) {
+  const maxRetries = 5;
+  await clearConsoleLine();
+  const spinner = ora({ text: chalk.cyan(` ┊ → Getting Random Questions${retryCount > 0 ? ` [Retry ke-${retryCount}/${maxRetries}]` : ''}`), prefixText: '', spinner: 'bouncingBar', interval: 120 }).start();
+  isSpinnerActive = true;
+  try {
+    let config = {
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${bearerToken}`,
+        'User-Agent': randomUseragent.getRandom(),
+      },
+    };
+    if (proxy) {
+      config.httpAgent = new HttpsProxyAgent(proxy);
+      config.httpsAgent = new HttpsProxyAgent(proxy);
+    }
+    const response = await axios.get('https://api.mention.network/questions/random-list', config);
+    const questions = response.data.data;
+    if (!questions || questions.length === 0) throw new Error('No questions found');
+    spinner.succeed(chalk.green(` ┊ ✓ Random Questions Fetched Successfully`));
+    await sleep(500);
+    return questions.map(q => q.text);
+  } catch (err) {
+    if (retryCount < maxRetries - 1) {
+      spinner.text = chalk.cyan(` ┊ → Getting Random Questions [Retry ke-${retryCount + 1}/${maxRetries}]`);
+      await sleep(5000);
+      return getRandomQuestions(bearerToken, proxy, retryCount + 1);
+    }
+    spinner.fail(chalk.red(` ┊ ✗ Failed Getting Random Questions: ${err.message}`));
+    await sleep(500);
+    throw err;
+  } finally {
+    spinner.stop();
+    isSpinnerActive = false;
+    await clearConsoleLine();
+  }
+}
+
+async function chatWithGemini(geminiApiKey, message, proxy = null, retryCount = 0) {
+  const maxRetries = 5;
+  await clearConsoleLine();
+  const spinner = ora({ text: chalk.cyan(` ┊ → Sending Chat${retryCount > 0 ? ` [Retry ke-${retryCount}/${maxRetries}]` : ''}`), prefixText: '', spinner: 'bouncingBar', interval: 120 }).start();
+  isSpinnerActive = true;
+  try {
+    const ai = new GoogleGenAI({ apiKey: geminiApiKey });
+    const response = await ai.models.generateContent({
+      model: "gemini-2.0-flash-lite",
+      contents: message,
+    });
+    const responseText = response.text;
+    if (!responseText) throw new Error('Invalid response');
+    spinner.succeed(chalk.green(` ┊ ✓ Chat Sent`));
+    await sleep(500);
+    return responseText;
+  } catch (err) {
+    if (retryCount < maxRetries - 1) {
+      spinner.text = chalk.cyan(` ┊ → Sending Chat [Retry ke-${retryCount + 1}/${maxRetries}]`);
+      await sleep(5000);
+      return chatWithGemini(geminiApiKey, message, proxy, retryCount + 1);
+    }
+    spinner.fail(chalk.red(` ┊ ✗ Failed Sending Chat to Gemini: ${err.message}`));
+    await sleep(500);
+    throw err;
+  } finally {
+    spinner.stop();
+    isSpinnerActive = false;
+    await clearConsoleLine();
+  }
+}
+
+async function getAIModel(bearerToken, modelQuery, proxy = null, retryCount = 0) {
+  const maxRetries = 5;
+  await clearConsoleLine();
+  const spinner = ora({ text: chalk.cyan(` ┊ → Searching AI Model (${modelQuery})${retryCount > 0 ? ` [Retry ke-${retryCount}/${maxRetries}]` : ''}`), prefixText: '', spinner: 'bouncingBar', interval: 120 }).start();
+  isSpinnerActive = true;
+  try {
+    let config = {
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${bearerToken}`,
+        'User-Agent': randomUseragent.getRandom(),
+      },
+    };
+    if (proxy) {
+      config.httpAgent = new HttpsProxyAgent(proxy);
+      config.httpsAgent = new HttpsProxyAgent(proxy);
+    }
+    const response = await axios.get(`https://api.mention.network/api/ai-models/search?query=${modelQuery}`, config);
+    const modelData = response.data.data[0];
+    if (!modelData || !modelData.id) throw new Error('No model found');
+    spinner.succeed(chalk.green(` ┊ ✓ AI Model Fetched: ${modelData.name}`));
+    await sleep(500);
+    return modelData.id;
+  } catch (err) {
+    if (retryCount < maxRetries - 1) {
+      spinner.text = chalk.cyan(` ┊ → Searching AI Model (${modelQuery}) [Retry ke-${retryCount + 1}/${maxRetries}]`);
+      await sleep(5000);
+      return getAIModel(bearerToken, modelQuery, proxy, retryCount + 1);
+    }
+    spinner.fail(chalk.red(` ┊ ✗ Failed Searching AI Model: ${err.message}`));
+    await sleep(500);
+    throw err;
+  } finally {
+    spinner.stop();
+    isSpinnerActive = false;
+    await clearConsoleLine();
+  }
+}
+
+async function submitInteraction(bearerToken, userId, modelId, requestText, responseText, proxy = null, retryCount = 0) {
+  const maxRetries = 5;
+  await clearConsoleLine();
+  const spinner = ora({ text: chalk.cyan(` ┊ → Submitting Interaction${retryCount > 0 ? ` [Retry ke-${retryCount}/${maxRetries}]` : ''}`), prefixText: '', spinner: 'bouncingBar', interval: 120 }).start();
+  isSpinnerActive = true;
+  try {
+    let config = {
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${bearerToken}`,
+        'User-Agent': randomUseragent.getRandom(),
+      },
+    };
+    if (proxy) {
+      config.httpAgent = new HttpsProxyAgent(proxy);
+      config.httpsAgent = new HttpsProxyAgent(proxy);
+    }
+    const payload = {
+      userId,
+      modelId,
+      requestText,
+      responseText,
+      metadata: { hasSearch: true, hasDeepSearch: false },
+    };
+    const response = await axios.post('https://api.mention.network/interactions', payload, config);
+    if (!response.data.aiResponse) throw new Error('Invalid response: aiResponse missing');
+    spinner.succeed(chalk.green(` ┊ ✓ Interaction Submitted Successfully`));
+    await sleep(500);
+    return response.data;
+  } catch (err) {
+    if (retryCount < maxRetries - 1) {
+      spinner.text = chalk.cyan(` ┊ → Submitting Interaction [Retry ke-${retryCount + 1}/${maxRetries}]`);
+      await sleep(5000);
+      return submitInteraction(bearerToken, userId, modelId, requestText, responseText, proxy, retryCount + 1);
+    }
+    spinner.fail(chalk.red(` ┊ ✗ Failed Submitting Interaction: ${err.message}`));
+    await sleep(500);
+    throw err;
+  } finally {
+    spinner.stop();
+    isSpinnerActive = false;
+    await clearConsoleLine();
+  }
+}
+
+function selectRandomModel() {
+  const models = ['gpt-3-5', 'gemini-2.5-flash'];
+  return models[crypto.randomInt(0, models.length)];
+}
+
+let lastCycleEndTime = null;
+
+function startCountdown(nextRunTime) {
+  const countdownInterval = setInterval(() => {
+    if (isSpinnerActive) return;
+    const now = moment();
+    const timeLeft = moment.duration(nextRunTime.diff(now));
+    if (timeLeft.asSeconds() <= 0) {
+      clearInterval(countdownInterval);
+      return;
+    }
+    clearConsoleLine();
+    const hours = Math.floor(timeLeft.asHours()).toString().padStart(2, '0');
+    const minutes = Math.floor(timeLeft.asMinutes() % 60).toString().padStart(2, '0');
+    const seconds = Math.floor(timeLeft.asSeconds() % 60).toString().padStart(2, '0');
+    process.stdout.write(chalk.cyan(` ┊ ⏳ Waiting Next Loop: ${hours}:${minutes}:${seconds}\r`));
+  }, 1000);
+}
+
+async function processAccounts(accounts, accountProxies, chatCount, noType) {
+  let successCount = 0;
+  let failCount = 0;
+  let successfulChats = 0;
+  let failedChats = 0;
+
+  for (let i = 0; i < accounts.length; i++) {
+    const account = accounts[i];
+    const proxy = accountProxies[i];
+    const shortToken = `${account.bearer.slice(0, 8)}...${account.bearer.slice(-6)}`;
+
+    displayHeader(`═════[ Account ${i + 1}/${accounts.length} | @ ${getTimestamp()} ]═════`, chalk.blue);
+    console.log(chalk.cyan(` ┊ ${proxy ? `Used Proxy: ${proxy}` : 'Not Using Proxy'}`));
+
+    try {
+      const userInfo = await getUserInfo(account.bearer, proxy);
+      const username = userInfo.username || userInfo.twitterScreenName;
+      const userId = userInfo.id;
+      const lastLogin = moment(userInfo.lastLogin).tz('Asia/Jakarta').format('D/M/YYYY, HH:mm:ss');
+
+      console.log(chalk.yellow(' ┊ ┌── User Information ──'));
+      console.log(chalk.white(` ┊ │ Username: ${username}`));
+      console.log(chalk.white(` ┊ │ User ID: ${userId}`));
+      console.log(chalk.white(` ┊ │ Last Login: ${lastLogin}`));
+      console.log(chalk.yellow(' ┊ └──'));
+
+      const questions = await getRandomQuestions(account.bearer, proxy);
+
+      console.log(chalk.magentaBright(' ┊ ┌── Proses Chat ──'));
+      let currentChat = 0;
+      let usedAgents = [];
+
+      for (let j = 0; j < chatCount; j++) {
+        currentChat++;
+        console.log(chalk.yellow(` ┊ ├─ Chat ${createProgressBar(currentChat, chatCount)} ──`));
+        const message = questions[crypto.randomInt(0, questions.length)];
+        console.log(chalk.white(` ┊ │ Message: ${message}`));
+        try {
+          const aiResponse = await chatWithGemini(account.geminiApiKey, message, proxy);
+          await typeText(aiResponse, chalk.green, noType);
+
+          const modelQuery = selectRandomModel();
+          usedAgents.push(modelQuery);
+          const modelId = await getAIModel(account.bearer, modelQuery, proxy);
+
+          await submitInteraction(account.bearer, userId, modelId, message, aiResponse, proxy);
+          successfulChats++;
+          console.log(chalk.yellow(' ┊ └──'));
+        } catch (chatErr) {
+          console.log(chalk.red(` ┊ ✗ Chat ${j + 1} gagal: ${chatErr.message}`));
+          failedChats++;
+          console.log(chalk.yellow(' ┊ └──'));
+        }
+        await sleep(8000);
+      }
+      console.log(chalk.yellow(' ┊ └──'));
+
+      const finalUserInfo = await getUserInfo(account.bearer, proxy);
+      const finalUsername = finalUserInfo.username || finalUserInfo.twitterScreenName;
+      const finalUserId = finalUserInfo.id;
+      const totalPoint = finalUserInfo.totalPoint;
+
+      console.log(chalk.yellow(' ┊ ┌── Final User Information ──'));
+      console.log(chalk.white(` ┊ │ Username: ${finalUsername}`));
+      console.log(chalk.white(` ┊ │ User ID: ${finalUserId}`));
+      console.log(chalk.white(` ┊ │ Total Points: ${totalPoint}`));
+      console.log(chalk.yellow(' ┊ └──'));
+
+      console.log(chalk.yellow(' ┊ ┌── Agents Used ──'));
+      usedAgents.forEach((agent, idx) => {
+        console.log(chalk.white(` ┊ │ Chat ${idx + 1}: ${agent}`));
+      });
+      console.log(chalk.yellow(' ┊ └──'));
+
+      if (successfulChats > 0) {
+        successCount++;
+      } else {
+        failCount++;
+      }
+    } catch (err) {
+      console.log(chalk.red(` ┊ ✗ Error: ${err.message}`));
+      failCount++;
+    }
+
+    console.log(chalk.gray(' ┊ ══════════════════════════════════════'));
+  }
+
+  lastCycleEndTime = moment();
+  displayHeader(`═════[ Selesai @ ${getTimestamp()} ]═════`, chalk.blue, false);
+  console.log(chalk.gray(` ┊ ✅ ${successCount} akun sukses, ❌ ${failCount} akun gagal`));
+  const nextRunTime = moment().add(24, 'hours');
+  startCountdown(nextRunTime);
+}
+
+let isProcessing = false;
+
+function scheduleNextRun(accounts, accountProxies, chatCount, noType) {
+  const delay = 24 * 60 * 60 * 1000;
+  console.log(chalk.cyan(` ┊ ⏰ Proses akan diulang setiap 24 jam...`));
+  setInterval(async () => {
+    if (isProcessing || isSpinnerActive) return;
+    try {
+      isProcessing = true;
+      const nextRunTime = moment().add(24, 'hours');
+      await processAccounts(accounts, accountProxies, chatCount, noType);
+      startCountdown(nextRunTime);
+    } catch (err) {
+      console.log(chalk.red(` ✗ Error selama siklus: ${err.message}`));
+    } finally {
+      isProcessing = false;
+    }
+  }, delay);
+}
+
+async function main() {
+  console.log('\n');
+  displayBanner();
+  const noType = process.argv.includes('--no-type');
+  let accounts = [];
+  try {
+    const accountsData = await fs.readFile('account.json', 'utf8');
+    accounts = JSON.parse(accountsData);
+    if (!Array.isArray(accounts) || accounts.length === 0) {
+      throw new Error('Invalid or empty account.json');
+    }
+  } catch (err) {
+    console.log(chalk.red('✗ File account.json tidak ditemukan atau tidak valid! Pastikan berisi token bearer dan geminiApiKey.'));
+    rl.close();
+    return;
+  }
+
+  let chatCount;
+  while (true) {
+    const input = await promptUser('Masukkan jumlah chat per akun (maks 20): ');
+    chatCount = parseInt(input, 10);
+    if (!isNaN(chatCount) && chatCount > 0 && chatCount <= 20) break;
+    console.log(chalk.red('✗ Masukkan angka yang valid (1-20)!'));
+  }
+
+  let useProxy;
+  while (true) {
+    const input = await promptUser('Gunakan proxy? (y/n) ');
+    if (input.toLowerCase() === 'y' || input.toLowerCase() === 'n') {
+      useProxy = input.toLowerCase() === 'y';
+      break;
+    }
+    console.log(chalk.red('✗ Masukkan "y" atau "n"!'));
+  }
+
+  let proxies = [];
+  if (useProxy) {
+    try {
+      const proxyData = await fs.readFile('proxy.txt', 'utf8');
+      proxies = proxyData.split('\n').filter(line => line.trim() !== '');
+      if (proxies.length === 0) {
+        console.log(chalk.yellow('✗ File proxy.txt kosong. Lanjut tanpa proxy.'));
+      }
+    } catch (err) {
+      console.log(chalk.yellow('✗ File proxy.txt tidak ditemukan. Lanjut tanpa proxy.'));
+    }
+  }
+
+  const accountProxies = accounts.map((_, index) => proxies.length > 0 ? proxies[index % proxies.length] : null);
+
+  console.log(chalk.cyan(` ┊ ⏰ Memulai proses untuk ${accounts.length} akun...`));
+  await processAccounts(accounts, accountProxies, chatCount, noType);
+  scheduleNextRun(accounts, accountProxies, chatCount, noType);
+  rl.close();
+}
+
+main();
