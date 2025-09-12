@@ -9,6 +9,7 @@ import chalk from 'chalk';
 import moment from 'moment-timezone';
 import crypto from 'crypto';
 import { GoogleGenAI } from '@google/genai';
+import CryptoJS from 'crypto-js';
 
 function getTimestamp() {
   return moment().tz('Asia/Jakarta').format('D/M/YYYY, HH:mm:ss');
@@ -226,6 +227,18 @@ async function getAIModel(bearerToken, modelQuery, proxy = null, retryCount = 0)
   }
 }
 
+function generateKey(userId, timestamp) {
+  const hourStart = 3600000 * Math.floor(timestamp / 3600000);
+  const hourEnd = hourStart + 3600000;
+  const mod = (1337 * userId + (hourStart % 10000)) % 9999;
+  return [
+    (hourStart + 1).toString(),
+    hourEnd.toString(),
+    (userId * mod).toString(),
+    (hourStart * userId % 1000000).toString()
+  ].join('|');
+}
+
 async function submitInteraction(bearerToken, userId, modelId, requestText, responseText, proxy = null, retryCount = 0) {
   const maxRetries = 5;
   await clearConsoleLine();
@@ -243,12 +256,21 @@ async function submitInteraction(bearerToken, userId, modelId, requestText, resp
       config.httpAgent = new HttpsProxyAgent(proxy);
       config.httpsAgent = new HttpsProxyAgent(proxy);
     }
-    const payload = {
+    const payloadWithoutSignature = {
       userId,
       modelId,
       requestText,
       responseText,
-      metadata: { hasSearch: true, hasDeepSearch: false },
+      metadata: { hasSearch: false, hasDeepSearch: false },
+    };
+    const now = Date.now();
+    const key = generateKey(userId, now);
+    const sortedKeys = Object.keys(payloadWithoutSignature).sort();
+    const sortedJson = JSON.stringify(payloadWithoutSignature, sortedKeys);
+    const signature = CryptoJS.HmacSHA256(sortedJson, key).toString(CryptoJS.enc.Hex);
+    const payload = {
+      ...payloadWithoutSignature,
+      signature,
     };
     const response = await axios.post('https://api.mention.network/interactions', payload, config);
     if (!response.data.aiResponse) throw new Error('Invalid response: aiResponse missing');
@@ -271,10 +293,7 @@ async function submitInteraction(bearerToken, userId, modelId, requestText, resp
   }
 }
 
-function selectRandomModel() {
-  const models = ['gpt-3-5', 'gemini-2.5-flash'];
-  return models[crypto.randomInt(0, models.length)];
-}
+const models = ['gpt-3-5', 'gemini-2.5-flash'];
 
 let lastCycleEndTime = null;
 
@@ -321,24 +340,28 @@ async function processAccounts(accounts, accountProxies, chatCount, noType) {
       console.log(chalk.white(` ┊ │ Last Login: ${lastLogin}`));
       console.log(chalk.yellow(' ┊ └──'));
 
-      const questions = await getRandomQuestions(account.bearer, proxy);
+      let questions = await getRandomQuestions(account.bearer, proxy);
+      questions = questions.sort(() => 0.5 - Math.random());
+      const uniqueQuestions = questions.slice(0, chatCount);
 
       console.log(chalk.magentaBright(' ┊ ┌── Proses Chat ──'));
       let currentChat = 0;
       let usedAgents = [];
+      let modelIndex = 0;
 
       for (let j = 0; j < chatCount; j++) {
         currentChat++;
         console.log(chalk.yellow(` ┊ ├─ Chat ${createProgressBar(currentChat, chatCount)} ──`));
-        const message = questions[crypto.randomInt(0, questions.length)];
+        const message = uniqueQuestions[j] || questions[crypto.randomInt(0, questions.length)];
         console.log(chalk.white(` ┊ │ Message: ${message}`));
         try {
           const aiResponse = await chatWithGemini(account.geminiApiKey, message, proxy);
           await typeText(aiResponse, chalk.green, noType);
 
-          const modelQuery = selectRandomModel();
+          const modelQuery = models[modelIndex % models.length];
           usedAgents.push(modelQuery);
           const modelId = await getAIModel(account.bearer, modelQuery, proxy);
+          modelIndex++;
 
           await submitInteraction(account.bearer, userId, modelId, message, aiResponse, proxy);
           successfulChats++;
@@ -348,24 +371,31 @@ async function processAccounts(accounts, accountProxies, chatCount, noType) {
           failedChats++;
           console.log(chalk.yellow(' ┊ └──'));
         }
-        await sleep(8000);
+        await sleep(15000); 
       }
       console.log(chalk.yellow(' ┊ └──'));
 
       const finalUserInfo = await getUserInfo(account.bearer, proxy);
       const finalUsername = finalUserInfo.username || finalUserInfo.twitterScreenName;
       const finalUserId = finalUserInfo.id;
-      const totalPoint = finalUserInfo.totalPoint;
+      const totalPointPrompt = finalUserInfo.totalPointPrompt;
+      const totalPointRef = finalUserInfo.totalPointRef;
 
       console.log(chalk.yellow(' ┊ ┌── Final User Information ──'));
       console.log(chalk.white(` ┊ │ Username: ${finalUsername}`));
       console.log(chalk.white(` ┊ │ User ID: ${finalUserId}`));
-      console.log(chalk.white(` ┊ │ Total Points: ${totalPoint}`));
+      console.log(chalk.white(` ┊ │ Total Points Prompt: ${totalPointPrompt}`));
+      console.log(chalk.white(` ┊ │ Total Point Refferal: ${totalPointRef}`));
       console.log(chalk.yellow(' ┊ └──'));
 
       console.log(chalk.yellow(' ┊ ┌── Agents Used ──'));
-      usedAgents.forEach((agent, idx) => {
-        console.log(chalk.white(` ┊ │ Chat ${idx + 1}: ${agent}`));
+      let agentCounts = {};
+      usedAgents.forEach(agent => {
+        if (!agentCounts[agent]) agentCounts[agent] = 0;
+        agentCounts[agent]++;
+      });
+      Object.entries(agentCounts).forEach(([agent, count]) => {
+        console.log(chalk.white(` ┊ │    ${agent}:  ${count}`));
       });
       console.log(chalk.yellow(' ┊ └──'));
 
