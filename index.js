@@ -117,10 +117,10 @@ async function getUserInfo(bearerToken, proxy = null, retryCount = 0) {
   }
 }
 
-async function getRandomQuestions(bearerToken, proxy = null, retryCount = 0) {
+async function getRecommendedQuestions(bearerToken, userId, proxy = null, retryCount = 0) {
   const maxRetries = 5;
   await clearConsoleLine();
-  const spinner = ora({ text: chalk.cyan(` ┊ → Getting Random Questions${retryCount > 0 ? ` [Retry ke-${retryCount}/${maxRetries}]` : ''}`), prefixText: '', spinner: 'bouncingBar', interval: 120 }).start();
+  const spinner = ora({ text: chalk.cyan(` ┊ → Getting Recommended Questions${retryCount > 0 ? ` [Retry ke-${retryCount}/${maxRetries}]` : ''}`), prefixText: '', spinner: 'bouncingBar', interval: 120 }).start();
   isSpinnerActive = true;
   try {
     let config = {
@@ -134,19 +134,20 @@ async function getRandomQuestions(bearerToken, proxy = null, retryCount = 0) {
       config.httpAgent = new HttpsProxyAgent(proxy);
       config.httpsAgent = new HttpsProxyAgent(proxy);
     }
-    const response = await axios.get('https://api.mention.network/questions/random-list', config);
-    const questions = response.data.data;
-    if (!questions || questions.length === 0) throw new Error('No questions found');
-    spinner.succeed(chalk.green(` ┊ ✓ Random Questions Fetched Successfully`));
+    const response = await axios.get(`https://api.mention.network/questions/user/${userId}/recommendations`, config);
+    const categories = response.data.data;
+    if (!categories || categories.length === 0) throw new Error('No recommended questions found');
+    const questions = categories.flatMap(category => category.questions.map(q => q.text));
+    spinner.succeed(chalk.green(` ┊ ✓ Recommended Questions Fetched Successfully`));
     await sleep(500);
-    return questions.map(q => q.text);
+    return questions;
   } catch (err) {
     if (retryCount < maxRetries - 1) {
-      spinner.text = chalk.cyan(` ┊ → Getting Random Questions [Retry ke-${retryCount + 1}/${maxRetries}]`);
+      spinner.text = chalk.cyan(` ┊ → Getting Recommended Questions [Retry ke-${retryCount + 1}/${maxRetries}]`);
       await sleep(5000);
-      return getRandomQuestions(bearerToken, proxy, retryCount + 1);
+      return getRecommendedQuestions(bearerToken, userId, proxy, retryCount + 1);
     }
-    spinner.fail(chalk.red(` ┊ ✗ Failed Getting Random Questions: ${err.message}`));
+    spinner.fail(chalk.red(` ┊ ✗ Failed Getting Recommended Questions: ${err.message}`));
     await sleep(500);
     throw err;
   } finally {
@@ -164,7 +165,7 @@ async function chatWithGemini(geminiApiKey, message, proxy = null, retryCount = 
   try {
     const ai = new GoogleGenAI({ apiKey: geminiApiKey });
     const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash-lite",
+      model: "gemini-2.0-flash",
       contents: message,
     });
     const responseText = response.text;
@@ -293,7 +294,46 @@ async function submitInteraction(bearerToken, userId, modelId, requestText, resp
   }
 }
 
-const models = ['gpt-3-5', 'gemini-2.5-flash'];
+async function getTotalPoints(bearerToken, proxy = null, retryCount = 0) {
+  const maxRetries = 5;
+  await clearConsoleLine();
+  const spinner = ora({ text: chalk.cyan(` ┊ → Getting Total Points${retryCount > 0 ? ` [Retry ke-${retryCount}/${maxRetries}]` : ''}`), prefixText: '', spinner: 'bouncingBar', interval: 120 }).start();
+  isSpinnerActive = true;
+  try {
+    let config = {
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${bearerToken}`,
+        'User-Agent': randomUseragent.getRandom(),
+      },
+    };
+    if (proxy) {
+      config.httpAgent = new HttpsProxyAgent(proxy);
+      config.httpsAgent = new HttpsProxyAgent(proxy);
+    }
+    const response = await axios.get('https://api.mention.network/users/statistics/total-point', config);
+    const totalPoint = response.data.totalPoint;
+    if (totalPoint === undefined) throw new Error('Invalid response: totalPoint missing');
+    spinner.succeed(chalk.green(` ┊ ✓ Total Points Fetched Successfully`));
+    await sleep(500);
+    return totalPoint;
+  } catch (err) {
+    if (retryCount < maxRetries - 1) {
+      spinner.text = chalk.cyan(` ┊ → Getting Total Points [Retry ke-${retryCount + 1}/${maxRetries}]`);
+      await sleep(5000);
+      return getTotalPoints(bearerToken, proxy, retryCount + 1);
+    }
+    spinner.fail(chalk.red(` ┊ ✗ Failed Getting Total Points: ${err.message}`));
+    await sleep(500);
+    throw err;
+  } finally {
+    spinner.stop();
+    isSpinnerActive = false;
+    await clearConsoleLine();
+  }
+}
+
+const models = ['gpt-3-5', 'gemini-2.5-flash', 'grok-3', 'deepseek_default'];
 
 let lastCycleEndTime = null;
 
@@ -340,7 +380,7 @@ async function processAccounts(accounts, accountProxies, chatCount, noType) {
       console.log(chalk.white(` ┊ │ Last Login: ${lastLogin}`));
       console.log(chalk.yellow(' ┊ └──'));
 
-      let questions = await getRandomQuestions(account.bearer, proxy);
+      let questions = await getRecommendedQuestions(account.bearer, userId, proxy);
       questions = questions.sort(() => 0.5 - Math.random());
       const uniqueQuestions = questions.slice(0, chatCount);
 
@@ -371,21 +411,19 @@ async function processAccounts(accounts, accountProxies, chatCount, noType) {
           failedChats++;
           console.log(chalk.yellow(' ┊ └──'));
         }
-        await sleep(15000); 
+        await sleep(15000);
       }
       console.log(chalk.yellow(' ┊ └──'));
 
       const finalUserInfo = await getUserInfo(account.bearer, proxy);
       const finalUsername = finalUserInfo.username || finalUserInfo.twitterScreenName;
       const finalUserId = finalUserInfo.id;
-      const totalPointPrompt = finalUserInfo.totalPointPrompt;
-      const totalPointRef = finalUserInfo.totalPointRef;
+      const totalPoint = await getTotalPoints(account.bearer, proxy);
 
       console.log(chalk.yellow(' ┊ ┌── Final User Information ──'));
       console.log(chalk.white(` ┊ │ Username: ${finalUsername}`));
       console.log(chalk.white(` ┊ │ User ID: ${finalUserId}`));
-      console.log(chalk.white(` ┊ │ Total Points Prompt: ${totalPointPrompt}`));
-      console.log(chalk.white(` ┊ │ Total Point Refferal: ${totalPointRef}`));
+      console.log(chalk.white(` ┊ │ Total Points: ${totalPoint}`));
       console.log(chalk.yellow(' ┊ └──'));
 
       console.log(chalk.yellow(' ┊ ┌── Agents Used ──'));
