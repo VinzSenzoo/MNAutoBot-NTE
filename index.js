@@ -95,9 +95,15 @@ async function getUserInfo(bearerToken, proxy = null, retryCount = 0) {
       config.httpAgent = new HttpsProxyAgent(proxy);
       config.httpsAgent = new HttpsProxyAgent(proxy);
     }
-    const response = await axios.get('https://api.mention.network/users/me', config);
-    const userData = response.data;
-    if (!userData.id) throw new Error('Invalid response: user ID missing');
+    const response = await axios.get('https://api-dev.mentionnetwork.xyz/voyage/leaderboard?page=1&limit=100&period=all_time', config);
+    const myRank = response.data.my_rank;
+    if (!myRank || !myRank.user_id) throw new Error('Invalid response: user ID missing');
+    const userData = {
+      id: myRank.user_id,
+      username: myRank.user_name || myRank.twitter_screen_name,
+      totalPoints: myRank.total_points,
+      rank: myRank.rank
+    };
     spinner.succeed(chalk.green(` ┊ ✓ User Info Fetched Successfully`));
     await sleep(500);
     return userData;
@@ -134,10 +140,20 @@ async function getRecommendedQuestions(bearerToken, userId, proxy = null, retryC
       config.httpAgent = new HttpsProxyAgent(proxy);
       config.httpsAgent = new HttpsProxyAgent(proxy);
     }
-    const response = await axios.get(`https://api.mention.network/questions/user/${userId}/recommendations`, config);
-    const categories = response.data.data;
-    if (!categories || categories.length === 0) throw new Error('No recommended questions found');
-    const questions = categories.flatMap(category => category.questions.map(q => q.text));
+
+    let response = await axios.get(`https://api-dev.mentionnetwork.xyz/questions/user/x2-point-recommendations?take=100&page=1&&&sort_type=ASC&`, config);
+    let data = response.data;
+    let questions = data.result?.data?.map(q => q.text) || [];
+    if (!questions || questions.length === 0) {
+      response = await axios.get(`https://api-dev.mentionnetwork.xyz/questions/user/recommendations?`, config);
+      data = response.data;
+      const categories = data.data || [];
+      if (!categories || categories.length === 0) throw new Error('No recommended questions found');
+      questions = categories.flatMap(category => category.questions.map(q => q.text));
+    }
+
+    if (!questions || questions.length === 0) throw new Error('No recommended questions found');
+
     spinner.succeed(chalk.green(` ┊ ✓ Recommended Questions Fetched Successfully`));
     await sleep(500);
     return questions;
@@ -294,46 +310,7 @@ async function submitInteraction(bearerToken, userId, modelId, requestText, resp
   }
 }
 
-async function getTotalPoints(bearerToken, proxy = null, retryCount = 0) {
-  const maxRetries = 5;
-  await clearConsoleLine();
-  const spinner = ora({ text: chalk.cyan(` ┊ → Getting Total Points${retryCount > 0 ? ` [Retry ke-${retryCount}/${maxRetries}]` : ''}`), prefixText: '', spinner: 'bouncingBar', interval: 120 }).start();
-  isSpinnerActive = true;
-  try {
-    let config = {
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${bearerToken}`,
-        'User-Agent': randomUseragent.getRandom(),
-      },
-    };
-    if (proxy) {
-      config.httpAgent = new HttpsProxyAgent(proxy);
-      config.httpsAgent = new HttpsProxyAgent(proxy);
-    }
-    const response = await axios.get('https://api.mention.network/users/statistics/total-point', config);
-    const totalPoint = response.data.totalPoint;
-    if (totalPoint === undefined) throw new Error('Invalid response: totalPoint missing');
-    spinner.succeed(chalk.green(` ┊ ✓ Total Points Fetched Successfully`));
-    await sleep(500);
-    return totalPoint;
-  } catch (err) {
-    if (retryCount < maxRetries - 1) {
-      spinner.text = chalk.cyan(` ┊ → Getting Total Points [Retry ke-${retryCount + 1}/${maxRetries}]`);
-      await sleep(5000);
-      return getTotalPoints(bearerToken, proxy, retryCount + 1);
-    }
-    spinner.fail(chalk.red(` ┊ ✗ Failed Getting Total Points: ${err.message}`));
-    await sleep(500);
-    throw err;
-  } finally {
-    spinner.stop();
-    isSpinnerActive = false;
-    await clearConsoleLine();
-  }
-}
-
-const models = ['gpt-3-5', 'gemini-2.5-flash', 'grok-3', 'deepseek_default'];
+const models = ['gpt-3-5', 'gemini-2.5-flash', 'grok-4', 'deepseek_default'];
 
 let lastCycleEndTime = null;
 
@@ -370,14 +347,12 @@ async function processAccounts(accounts, accountProxies, chatCount, noType) {
 
     try {
       const userInfo = await getUserInfo(account.bearer, proxy);
-      const username = userInfo.username || userInfo.twitterScreenName;
+      const username = userInfo.username;
       const userId = userInfo.id;
-      const lastLogin = moment(userInfo.lastLogin).tz('Asia/Jakarta').format('D/M/YYYY, HH:mm:ss');
 
       console.log(chalk.yellow(' ┊ ┌── User Information ──'));
       console.log(chalk.white(` ┊ │ Username: ${username}`));
       console.log(chalk.white(` ┊ │ User ID: ${userId}`));
-      console.log(chalk.white(` ┊ │ Last Login: ${lastLogin}`));
       console.log(chalk.yellow(' ┊ └──'));
 
       let questions = await getRecommendedQuestions(account.bearer, userId, proxy);
@@ -416,14 +391,16 @@ async function processAccounts(accounts, accountProxies, chatCount, noType) {
       console.log(chalk.yellow(' ┊ └──'));
 
       const finalUserInfo = await getUserInfo(account.bearer, proxy);
-      const finalUsername = finalUserInfo.username || finalUserInfo.twitterScreenName;
+      const finalUsername = finalUserInfo.username;
       const finalUserId = finalUserInfo.id;
-      const totalPoint = await getTotalPoints(account.bearer, proxy);
+      const totalPoint = finalUserInfo.totalPoints;
+      const rank = finalUserInfo.rank;
 
       console.log(chalk.yellow(' ┊ ┌── Final User Information ──'));
       console.log(chalk.white(` ┊ │ Username: ${finalUsername}`));
       console.log(chalk.white(` ┊ │ User ID: ${finalUserId}`));
       console.log(chalk.white(` ┊ │ Total Points: ${totalPoint}`));
+      console.log(chalk.white(` ┊ │ Rank: ${rank}`));
       console.log(chalk.yellow(' ┊ └──'));
 
       console.log(chalk.yellow(' ┊ ┌── Agents Used ──'));
