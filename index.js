@@ -471,12 +471,12 @@ async function main() {
     return;
   }
 
-  let chatCount;
+ let chatCount;
   while (true) {
-    const input = await promptUser('Masukkan jumlah chat per akun (maks 20): ');
+    const input = await promptUser('Masukkan jumlah chat per akun: ');
     chatCount = parseInt(input, 10);
-    if (!isNaN(chatCount) && chatCount > 0 && chatCount <= 20) break;
-    console.log(chalk.red('✗ Masukkan angka yang valid (1-20)!'));
+    if (!isNaN(chatCount) && chatCount > 0) break;
+    console.log(chalk.red('✗ Masukkan angka yang valid (minimal 1)!'));
   }
 
   let useProxy;
@@ -511,4 +511,5 @@ async function main() {
 }
 
 main();
+
 
