@@ -95,7 +95,7 @@ async function getUserInfo(bearerToken, proxy = null, retryCount = 0) {
       config.httpAgent = new HttpsProxyAgent(proxy);
       config.httpsAgent = new HttpsProxyAgent(proxy);
     }
-    const response = await axios.get('https://api-dev.mentionnetwork.xyz/voyage/leaderboard?page=1&limit=100&period=all_time', config);
+    const response = await axios.get('https://api.mention.network/voyage/leaderboard?page=1&limit=100&period=all_time', config);
     const myRank = response.data.my_rank;
     if (!myRank || !myRank.user_id) throw new Error('Invalid response: user ID missing');
     const userData = {
@@ -141,11 +141,11 @@ async function getRecommendedQuestions(bearerToken, userId, proxy = null, retryC
       config.httpsAgent = new HttpsProxyAgent(proxy);
     }
 
-    let response = await axios.get(`https://api-dev.mentionnetwork.xyz/questions/user/x2-point-recommendations?take=100&page=1&&&sort_type=ASC&`, config);
+    let response = await axios.get(`https://api.mention.network/questions/user/x2-point-recommendations?take=100&page=1&&&sort_type=ASC&`, config);
     let data = response.data;
     let questions = data.result?.data?.map(q => q.text) || [];
     if (!questions || questions.length === 0) {
-      response = await axios.get(`https://api-dev.mentionnetwork.xyz/questions/user/recommendations?`, config);
+      response = await axios.get(`https://api.mention.network/questions/user/recommendations??`, config);
       data = response.data;
       const categories = data.data || [];
       if (!categories || categories.length === 0) throw new Error('No recommended questions found');
@@ -511,3 +511,4 @@ async function main() {
 }
 
 main();
+
